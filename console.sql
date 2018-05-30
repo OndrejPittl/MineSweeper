@@ -19,15 +19,6 @@
 
 
 -- *****
--- Holds game settings.
--- ***********
--- create or replace package game_settings is
---  game_id     number := 1;
---  error_msg   varchar2(255) := '';
---  safetyCheck number  := 1;
--- end;
-
--- *****
 -- Constants definitions.
 -- ***********
 create or replace package game_constants is
@@ -57,6 +48,67 @@ create or replace package game_constants is
 end;
 
 
+
+-- *************** Game Commands ****************
+
+begin
+
+  -------------- INIT DATABASE --------------
+  --  1. drop tables OR clear database
+  --  2. create tables, procedures, ...
+  --  3. fill with crucial data
+  -- drop_tables();
+  -- prepare_database();
+
+
+  ---------------- INIT GAME ----------------
+  -- create game:
+  --  a) pre-defined difficulty
+  --  b) custom difficulty
+
+  --create_game_custom(20, 20, 10);
+  --create_game_predefined(game_constants.DIFFICULTY_BEGINNER);
+
+
+  ------------------ GAME -------------------
+  -- new_move(1, 9, game_constants.MOVE_MARK);
+  -- new_move(1, 9, game_constants.MOVE_UNMARK);
+  -- new_move(9, 9, game_constants.MOVE_UNCOVER);
+
+  -- print_game_area();
+  -- print_game_area_all();
+
+
+  ---------------- RESET GAME ---------------
+  -- reset_game();
+
+
+  ----------------- VIEWS -------------------
+  -- select * from vitezove;
+  -- select * from porazeni;
+  -- select * from chybne_miny;
+  -- select * from oblast_tisk;
+
+
+  ------------------ PRINTS -----------------
+  -- print_game_area_all();
+  -- print_game_area();
+  -- select * from oblast_tisk;
+
+
+
+  -------------------------------------------
+  ---------------- SCENARIO -----------------
+  -------------------------------------------
+
+
+
+
+  null;
+end;
+
+
+
 /***************** DataTypes ******************/
 
 create or replace type neighbour_array is varray(8) of number;
@@ -65,46 +117,12 @@ create or replace type neighbour_array is varray(8) of number;
 
 /******************* Tables *******************/
 
-
-begin
-  -- init database
-
-  -- dev_drop_tables();
-  -- create_game_custom(20, 20, 10);
-
-  -- clean + init database
-  clear_all();
-  initialize();
-  null;
-end;
-
-begin
-  -- init game
-
-  clearTmp(null);
-  create_game_predefined(game_constants.DIFFICULTY_DEV);
-  print_game_area_all();
-end;
-
-
-begin
-  -- reset game
-
-  --update pole set pole.visible = game_constants.FALSE;
-  --delete from mina where id_pole = (select pole.id from pole where pole.x = 3 and pole.y = 9);
-  null;
-end;
-
-begin
-  new_move(4, 1, game_constants.MOVE_UNCOVER);
-  new_move(4, 2, game_constants.MOVE_UNCOVER);
-
-  print_game_area_all();
-end;
-
-
-
-
+-- *****
+-- Game settings.
+--  a) current game ID
+--  b) error message
+--  c) development flag - enables/disables logging into console in odkryj_pole
+-- ***********
 create table game_settings (
   id        number        primary key,
   val       number,
@@ -130,8 +148,8 @@ CREATE TABLE hra (
   id                  number            PRIMARY KEY,
   id_stav             number            NOT NULL,
   marked_mine_count   number  default 0 NOT NULL,
-  start_timestamp     date,
-  end_timestamp       date,
+  start_timestamp     timestamp,
+  end_timestamp       timestamp,
 
   constraint fk_hra_id_stav foreign key(id_stav) references stav(id),
   constraint chk_hra_marked_mine_count CHECK (marked_mine_count >= 0)
@@ -225,12 +243,6 @@ CREATE TABLE tah (
   constraint fk_tah_id_pole foreign key(id_pole) references pole(id)
 );
 
-
-
-
-
-----------------------------
-
 -- *****
 -- TMP table.
 -- ***********
@@ -254,13 +266,14 @@ create table dev_tmp (
 
 /***************** Sequences ******************/
 
-
+/*
 drop sequence seq_tmp_id_increment;
 drop sequence seq_hra_id_increment;
 drop sequence seq_pole_id_increment;
 drop sequence seq_mina_id_increment;
 drop sequence seq_oblast_id_increment;
 drop sequence seq_tah_id_increment;
+*/
 
 -- *****
 -- Sequence: Auto-increment ID of the Pole table.
@@ -304,7 +317,7 @@ create sequence seq_tah_id_increment increment by 1 start with 1;
 -- *****
 -- Game ID getter.
 -- ***********
-create or replace function gameId return number as
+create or replace function game_id return number as
   id  number;
   begin
     select game_settings.val into id from game_settings
@@ -312,6 +325,9 @@ create or replace function gameId return number as
     return id;
   end;
 
+-- *****
+-- Development flag getter.
+-- ***********
 create or replace function is_dev return number as
   isDev  number;
   begin
@@ -323,7 +339,7 @@ create or replace function is_dev return number as
 -- *****
 -- Drops all related tables.
 -- ***********
-create or replace procedure dev_drop_tables as
+create or replace procedure drop_tables as
   type array_t is varray(20) of varchar2(20);
   expectedTables array_t := array_t(
       'tmp',
@@ -354,6 +370,23 @@ create or replace procedure dev_drop_tables as
       EXECUTE IMMEDIATE 'drop table ' || expectedTables(i);
       DBMS_OUTPUT.put_line('  Dropped table: ' || expectedTables(i));
     end loop;
+
+    dbms_output.put_line('Tables dropped.');
+  end;
+
+
+-- *****
+-- Prints horizontal divider.
+-- ***********
+create or replace procedure print_game_area_header_divider(num in number) as
+  divider   varchar2(350);
+
+  begin
+    for i in 1..(num + 1) loop
+      divider := divider || '---';
+    end loop;
+
+    dbms_output.put_line(divider);
   end;
 
 
@@ -394,16 +427,57 @@ create or replace procedure print_game_area_y_axis_header(idx in number) as
     DBMS_OUTPUT.put(idx || divider);
   end;
 
-create or replace procedure print_game_area_header_divider(num in number) as
-  divider   varchar2(350);
+
+-- *****
+-- Builds a string of values of the fields forming a row at the specified index.
+-- ***********
+create or replace function radek_oblasti(rowNum in number, renderYAxisHeader in number, renderAll in number) return varchar2 as
+  area          oblast%rowtype;
+  rowString     varchar2(350) := null;
+  markRecCount  number;
 
   begin
-    for i in 1..(num + 1) loop
-      divider := divider || '---';
+    select * into area from oblast where oblast.id_hra = game_id();
+
+    if rowNum not between 1 and area.height then
+      return rowString;
+    end if;
+
+    --select LISTAGG(pole.value, '|') WITHIN GROUP (ORDER BY pole.x)
+    --  into rowString from pole where pole.y = rowNum and pole.id_hra = game_id();
+
+    for rec in (select * from pole
+                where pole.y = rowNum and pole.id_hra = game_id()
+                order by pole.x asc) loop
+
+      if rowString is null and renderYAxisHeader = game_constants.TRUE then
+        print_game_area_y_axis_header(rowNum);
+      end if;
+
+
+      select count(mina.id) into markRecCount from mina
+        where mina.id_pole = rec.id;
+
+      if renderAll = game_constants.FALSE and markRecCount > 0 then
+        rowString := rowString || '  x';
+      else
+        if rec.visible = game_constants.TRUE or renderAll = game_constants.TRUE then
+          if rec.value < 0 then
+            rowString := rowString || ' ';
+          else
+            rowString := rowString || '  ';
+          end if;
+
+          rowString := rowString || rec.value;
+        else
+          rowString := rowString || '  _';
+        end if;
+      end if;
     end loop;
 
-    dbms_output.put_line(divider);
+    return rowString;
   end;
+
 
 -- *****
 -- Prints values of all fields of the playground.
@@ -413,7 +487,7 @@ create or replace procedure print_game_area_dev as
   fieldRow  varchar2(255);
 
   begin
-    select * into area from oblast where oblast.id_hra = gameId();
+    select * into area from oblast where oblast.id_hra = game_id();
 
     -- x-axis header
     print_game_area_x_axis_header(area.width);
@@ -432,7 +506,7 @@ create or replace procedure print_game_area as
   area      oblast%rowtype;
 
   begin
-    select * into area from oblast where oblast.id_hra = gameId();
+    select * into area from oblast where oblast.id_hra = game_id();
 
     -- x-axis header
     print_game_area_x_axis_header(area.width);
@@ -455,11 +529,11 @@ create or replace procedure print_game_area_visibility as
 
   cursor cFields is
     select * from pole
-    where pole.id_hra = gameId()
+    where pole.id_hra = game_id()
     order by pole.y, pole.x;
 
   begin
-    select * into area from oblast where oblast.id_hra = gameId();
+    select * into area from oblast where oblast.id_hra = game_id();
     open cFields;
 
     -- x-axis header
@@ -486,6 +560,9 @@ create or replace procedure print_game_area_visibility as
     close cFields;
   end;
 
+-- *****
+-- Prints playground, visibility and uncovered playgoround.
+-- ***********
 create or replace procedure print_game_area_all as
   begin
     DBMS_OUTPUT.put_line(' ');
@@ -533,11 +610,9 @@ create or replace procedure initialize as
     select * from dual;
 
     insert all
-
       -- safety check
       into dev_tmp values(1, 1000, null)
       into dev_tmp values(2, 0,  null)
-
     select * from dual;
     commit;
   end;
@@ -545,6 +620,7 @@ create or replace procedure initialize as
 create or replace procedure create_new_game as
   begin
     insert into hra(id) values(null);
+    dbms_output.put_line('Game created.');
     commit;
   end;
 
@@ -566,22 +642,33 @@ create or replace procedure create_game_predefined(difficulty in varchar2) as
   begin
     create_new_game();
     insert into oblast(predefined) values (difficulty);
+    print_game_area();
     commit;
+  end;
+
+-- *****
+-- Resets current game.
+-- ***********
+create or replace procedure reset_game as
+  begin
+    update pole set pole.visible = game_constants.FALSE;
+    delete from mina where mina.id_hra = game_id();
+    print_game_area_all();
   end;
 
 -- *****
 -- Game ID setter.
 -- ***********
-create or replace procedure setGameId(gameId in number) as
+create or replace procedure setgame_id(game_id in number) as
   begin
-    update game_settings set game_settings.val = gameId
+    update game_settings set game_settings.val = game_id
       where game_settings.id = game_constants.GS_GAME_ID;
   end;
 
 -- *****
 -- Err msg getter.
 -- ***********
-create or replace function errMsg return varchar2 as
+create or replace function err_msg return varchar2 as
   msg  varchar2(255);
   begin
     select game_settings.str_val into msg from game_settings
@@ -592,7 +679,7 @@ create or replace function errMsg return varchar2 as
 -- *****
 -- Err msg setter.
 -- ***********
-create or replace procedure setErrMsg(msg in varchar2) as
+create or replace procedure set_err_msg(msg in varchar2) as
   begin
     update game_settings set game_settings.str_val = msg
       where game_settings.id = game_constants.GS_ERR_MSG;
@@ -602,7 +689,7 @@ create or replace procedure setErrMsg(msg in varchar2) as
 -- TODO:
 -- Checks number of iterations.
 -- ***********
-create or replace function devIsSafe return number as
+create or replace function dev_is_safe return number as
   it    number;
   lim   number;
   begin
@@ -624,19 +711,9 @@ create or replace function devIsSafe return number as
   end;
 
 -- *****
--- TODO:
--- Number of iterations getter.
+-- Number of iterations getter in odkryj_pole.
 -- ***********
-create or replace function devSafetyCheck return number as
-  val    number;
-  begin
-    select dev_tmp.val into val from dev_tmp
-      where dev_tmp.id = 2;
-    --dbms_output.put_line('safety check: ' || val);
-    return val;
-  end;
-
-create or replace function devSafetyCheckUpdate(lim in number) return number as
+create or replace function dev_safety_check return number as
   val    number;
   begin
     select dev_tmp.val into val from dev_tmp
@@ -646,25 +723,26 @@ create or replace function devSafetyCheckUpdate(lim in number) return number as
   end;
 
 -- *****
--- TODO:
 -- Increments number of iterations.
 -- ***********
-create or replace procedure devSafetyCheckInc as
+create or replace procedure dev_safety_checkInc as
   begin
     update dev_tmp set dev_tmp.val = dev_tmp.val + 1
       where dev_tmp.id = 2;
   end;
 
 -- *****
--- TODO:
 -- Resets number of iterations.
 -- ***********
-create or replace procedure devSafetyCheckReset as
+create or replace procedure dev_safety_checkReset as
   begin
     update dev_tmp set dev_tmp.val = 0 where dev_tmp.id = 2;
   end;
 
-create or replace procedure clearTmp(gId in number) as
+-- *****
+-- Clears TMP table.
+-- ***********
+create or replace procedure clear_tmp(gId in number) as
   begin
     if gId is not null then
       delete from tmp where tmp.group_id = gId;
@@ -679,7 +757,7 @@ create or replace procedure clearTmp(gId in number) as
 create or replace procedure clear_game as
   g_id  number;
   begin
-    g_id := gameId();
+    g_id := game_id();
     delete from tmp;
     delete from tah     where tah.id_hra = g_id;
     delete from oblast  where oblast.id_hra = g_id;
@@ -709,6 +787,17 @@ create or replace procedure clear_all as
   end;
 
 -- *****
+-- Wipes database and initializes with crucial data.
+-- ***********
+create or replace procedure prepare_database as
+  begin
+    -- clean + init database
+    clear_all();
+    initialize();
+    dbms_output.put_line('Database prepared.');
+  end;
+
+-- *****
 -- Generates Fields of the Pole table.
 -- (new records –> Pole)
 -- ***********
@@ -719,14 +808,14 @@ create or replace procedure initialize_fields as
   area  oblast%rowtype;
 
   begin
-    select * into area from oblast where oblast.id_hra = gameId();
+    select * into area from oblast where oblast.id_hra = game_id();
 
     s := area.width * area.height;
 
     for i in 0..(s - 1) loop
       x := mod(i, area.width) + 1;
       y := floor(i / area.width) + 1;
-      insert into pole (id_hra, x, y) values (gameId(), x, y);
+      insert into pole (id_hra, x, y) values (game_id(), x, y);
       --dbms_output.put_line('x: ' || x || ' y: ' || y);
     end loop;
   end;
@@ -736,7 +825,7 @@ create or replace procedure initialize_fields as
 -- ***********
 create or replace procedure zaminuj_oblast as
   cursor cFields is
-  select pole.id from pole where pole.id_hra = gameId();
+  select pole.id from pole where pole.id_hra = game_id();
 
   cursor cTmps is
   select tmp.group_id from tmp order by tmp.val;
@@ -749,9 +838,9 @@ create or replace procedure zaminuj_oblast as
 
   begin
     mineCount := 0;
-    select * into area from oblast where oblast.id_hra = gameId();
+    select * into area from oblast where oblast.id_hra = game_id();
 
-    delete from tmp;
+    clear_tmp(null);
 
     -- each field is given a random number
     open cFields;
@@ -780,11 +869,11 @@ create or replace procedure zaminuj_oblast as
     end loop;
 
     close cTmps;
-    clearTmp(null);
+    clear_tmp(null);
 
   exception
     when no_data_found then
-      raise_application_error(-20002, 'ERROR: Oblast hry id ' || gameId() || ' nebyla nalezena.');
+      raise_application_error(-20002, 'ERROR: Oblast hry id ' || game_id() || ' nebyla nalezena.');
   end;
 
 
@@ -804,7 +893,7 @@ create or replace function get_neighbour_fields(field in pole%rowtype) return ne
 
   begin
     neighbours := neighbour_array();
-    gId := gameId();
+    gId := game_id();
 
     select * into area from oblast where oblast.id_hra = gId;
 
@@ -917,7 +1006,7 @@ create or replace function count_adjacent_covered_fields(neighbours in neighbour
 -- ***********
 create or replace procedure spocitej_oblast as
   cursor cFields is
-    select * from pole where pole.id_hra = gameId();
+    select * from pole where pole.id_hra = game_id();
 
   field         pole%rowtype;
   fieldValue    number;
@@ -953,7 +1042,7 @@ create or replace function is_marked(field in pole%rowtype) return number as
 
   begin
     select count(mina.id) into recCountInMinaTable from mina
-      where mina.id_pole = field.id and mina.id_hra = gameId();
+      where mina.id_pole = field.id and mina.id_hra = game_id();
 
       if recCountInMinaTable > 0 then
         return game_constants.TRUE;
@@ -977,11 +1066,10 @@ create or replace procedure uncover_field(field in out pole%rowtype) as
 -- ***********
 create or replace procedure register_game_beginning as
   begin
-    dbms_output.put_line('register_game_beginning');
     update hra
-      set hra.start_timestamp = SYSDATE,
+      set hra.start_timestamp = CURRENT_TIMESTAMP,
           hra.id_stav = game_constants.GAME_STATUS_IN_PROGRESS
-      where hra.id = gameId();
+      where hra.id = game_id();
   end;
 
 -- *****
@@ -995,7 +1083,7 @@ create or replace procedure register_game_lose as
     update hra
       set hra.end_timestamp = SYSDATE,
           hra.id_stav = game_constants.GAME_STATUS_LOSE
-      where hra.id = gameId();
+      where hra.id = game_id();
   end;
 
 -- *****
@@ -1009,7 +1097,7 @@ create or replace procedure register_game_win as
     update hra
       set hra.end_timestamp = SYSDATE,
           hra.id_stav = game_constants.GAME_STATUS_WIN
-      where hra.id = gameId();
+      where hra.id = game_id();
   end;
 
 -- *****
@@ -1059,11 +1147,11 @@ create or replace procedure odkryj_pole(fieldId in number) as
   begin
 
     -- stuck-in-loop protection
-    devSafetyCheckInc();
+    dev_safety_checkInc();
 
-    itNum := devSafetyCheck();
+    itNum := dev_safety_check();
 
-    if devIsSafe() = game_constants.FALSE then
+    if dev_is_safe() = game_constants.FALSE then
       dbms_output.put_line('ERROR: STOPPED AT SAFETY CHECK.');
       return;
     end if;
@@ -1169,10 +1257,10 @@ create or replace function mnoho_min return number as
 
   begin
     select count(mina.id) into markedFieldCount from mina
-      where mina.id_hra = gameId();
+      where mina.id_hra = game_id();
 
     select oblast.mine_count into mineCount from oblast
-      where id_hra = gameId();
+      where id_hra = game_id();
 
     if markedFieldCount >= mineCount then
       return game_constants.TRUE;
@@ -1187,10 +1275,10 @@ create or replace function mnoho_min return number as
 -- ***********
 create or replace procedure oznac_miny as
   begin
-    --insert into mina (id_hra, id_pole) select gameId(), pole.id from pole
-    --where pole.id_hra = gameId() and pole.visible = 0;
+    --insert into mina (id_hra, id_pole) select game_id(), pole.id from pole
+    --where pole.id_hra = game_id() and pole.visible = 0;
     insert into mina (id_pole) select pole.id from pole
-      where pole.id_hra = gameId() and pole.visible = 0;
+      where pole.id_hra = game_id() and pole.visible = 0;
   end;
 
 -- *****
@@ -1221,69 +1309,19 @@ create or replace function spatny_parametr(width in number, height in number, mi
     -- check dimension restrictions
     if width  not between dimensionRestriction.min and dimensionRestriction.max or
        height not between dimensionRestriction.min and dimensionRestriction.max then
-      setErrMsg('ERROR: Dimension is out of bounds. Please, enter dimensions in the range of ' || dimensionRestriction.min || ' and ' || dimensionRestriction.max || '.');
+      set_err_msg('ERROR: Dimension is out of bounds. Please, enter dimensions in the range of ' || dimensionRestriction.min || ' and ' || dimensionRestriction.max || '.');
       return -1;
     end if;
 
     -- check mines restriction
     if mine_count not between 1 and maxMineCount then
-      setErrMsg('ERROR: Invalid mine count. Number of mines must be at least 1 and must not exceed ' || mineRestriction.max || '% of area (i.e.' || maxMineCount || ' mines for selected area).');
+      set_err_msg('ERROR: Invalid mine count. Number of mines must be at least 1 and must not exceed ' || mineRestriction.max || '% of area (i.e.' || maxMineCount || ' mines for selected area).');
       return -2;
     end if;
 
     return game_constants.FALSE;
   end;
 
-
--- *****
--- Builds a string of values of the fields forming a row at the specified index.
--- ***********
-create or replace function radek_oblasti(rowNum in number, renderYAxisHeader in number, renderAll in number) return varchar2 as
-  area          oblast%rowtype;
-  rowString     varchar2(350) := null;
-  markRecCount  number;
-
-  begin
-    select * into area from oblast where oblast.id_hra = gameId();
-
-    if rowNum not between 1 and area.height then
-      return rowString;
-    end if;
-
-    --select LISTAGG(pole.value, '|') WITHIN GROUP (ORDER BY pole.x)
-    --  into rowString from pole where pole.y = rowNum and pole.id_hra = gameId();
-
-    for rec in (select * from pole
-                where pole.y = rowNum and pole.id_hra = gameId()
-                order by pole.x asc) loop
-
-      if rowString is null and renderYAxisHeader = game_constants.TRUE then
-        print_game_area_y_axis_header(rowNum);
-      end if;
-
-
-      select count(mina.id) into markRecCount from mina
-        where mina.id_pole = rec.id;
-
-      if renderAll = game_constants.FALSE and markRecCount > 0 then
-        rowString := rowString || '  x';
-      else
-        if rec.visible = game_constants.TRUE or renderAll = game_constants.TRUE then
-          if rec.value < 0 then
-            rowString := rowString || ' ';
-          else
-            rowString := rowString || '  ';
-          end if;
-
-          rowString := rowString || rec.value;
-        else
-          rowString := rowString || '  _';
-        end if;
-      end if;
-    end loop;
-
-    return rowString;
-  end;
 
 
 -- *****
@@ -1301,10 +1339,10 @@ create or replace function vyhra return number as
     --        pole.value != -1;
 
     select count(pole.id) into mineCount from pole
-      where id_hra = gameId() and pole.value = -1;
+      where id_hra = game_id() and pole.value = -1;
 
     select count(pole.id) into coveredFieldCount from pole
-      where id_hra = gameId() and pole.visible = game_constants.FALSE;
+      where id_hra = game_id() and pole.visible = game_constants.FALSE;
 
     if mineCount = coveredFieldCount then
       return game_constants.TRUE;
@@ -1323,7 +1361,7 @@ create or replace function get_field(fieldX in number, fieldY in number) return 
 
   begin
     select * into area from oblast
-      where oblast.id_hra = gameId();
+      where oblast.id_hra = game_id();
 
     if fieldX not between 1 and area.width or
        fieldY not between 1 and area.height then
@@ -1333,7 +1371,7 @@ create or replace function get_field(fieldX in number, fieldY in number) return 
     select * into field from pole
       where pole.x = fieldX and
             pole.y = fieldY and
-            pole.id_hra = gameId();
+            pole.id_hra = game_id();
     return field;
 
   exception
@@ -1348,7 +1386,6 @@ create or replace function get_field(fieldX in number, fieldY in number) return 
 -- ***********
 create or replace procedure new_move(fieldX in number, fieldY in number, moveType in number) as
   field   pole%rowtype;
-
   begin
     field := get_field(fieldX, fieldY);
     insert into tah(id_pole, type) values (field.id, moveType);
@@ -1398,7 +1435,7 @@ create or replace trigger trig_hra_initialization
   begin
     select seq_hra_id_increment.nextval into :new.id from dual;
     :new.id_stav := game_constants.GAME_STATUS_INITIALIZED;
-    setGameId(:new.id);
+    setgame_id(:new.id);
   end;
 
 
@@ -1410,7 +1447,19 @@ create or replace trigger trig_mina_initialization
   for each row
   begin
     select seq_mina_id_increment.nextval into :new.id from dual;
-    :new.id_hra := gameId();
+    :new.id_hra := game_id();
+  end;
+
+-- *****
+-- Trigger: Counts mines and stores in HRA table.
+-- ***********
+create or replace trigger trig_mine_recount
+  after insert or delete on mina
+  declare
+    mineCount number;
+  begin
+    select count(mina.id) into mineCount from mina where mina.id_hra = game_id();
+    update hra set hra.marked_mine_count = mineCount where hra.id = game_id();
   end;
 
 
@@ -1434,7 +1483,7 @@ create or replace trigger trig_tah_initialization
   begin
     -- Is game still in progress?
     select hra.end_timestamp into endTimestamp from hra
-      where hra.id = gameId();
+      where hra.id = game_id();
 
     if endTimestamp is not null then
       raise gameEndedEx;
@@ -1444,30 +1493,6 @@ create or replace trigger trig_tah_initialization
       where mina.id_pole = :new.id_pole;
 
     select * into field from pole where pole.id = :new.id_pole;
-
-    /*
-    dbms_output.put('action : ');
-    if :new.type = game_constants.MOVE_MARK then
-      dbms_output.put_line('mark');
-    elsif :new.type = game_constants.MOVE_UNMARK then
-      dbms_output.put_line('unmark');
-    elsif :new.type = game_constants.MOVE_UNCOVER then
-      dbms_output.put_line('uncover');
-    end if;
-
-    if field.visible = game_constants.TRUE then
-      dbms_output.put_line('visible');
-    else
-      dbms_output.put_line('not visible');
-    end if;
-
-    if mineRowCount > 0 then
-      dbms_output.put_line('marked');
-    else
-      dbms_output.put_line('not marked');
-    end if;
-    */
-
 
     -- marked field
     if mineRowCount > 0 then
@@ -1510,7 +1535,7 @@ create or replace trigger trig_tah_initialization
 
     select seq_tah_id_increment.nextval into :new.id from dual;
     :new.timestamp := SYSDATE;
-    :new.id_hra := gameId();
+    :new.id_hra := game_id();
 
   exception
     when markedCantBeUncoveredEx then
@@ -1531,7 +1556,7 @@ create or replace trigger trig_tah_initialization
 
 
 -- *****
--- Trigger:
+-- Trigger: Area initialization.
 -- ***********
 create or replace trigger trig_oblast_initialization
   before insert on oblast
@@ -1581,9 +1606,7 @@ create or replace trigger trig_oblast_initialization
         into :new.id from dual;
 
     -- id_hra
-    :new.id_hra := gameId();
-
-
+    :new.id_hra := game_id();
 
   exception
     when invalidDifficulty then
@@ -1591,18 +1614,18 @@ create or replace trigger trig_oblast_initialization
     null;
 
     when invalidParamsDimension then
-        raise_application_error( -20003, errMsg());
+        raise_application_error( -20003, err_msg());
       null;
 
     when invalidParamsMineCount then
-      raise_application_error( -20004, errMsg());
+      raise_application_error( -20004, err_msg());
       null;
   end;
 
 
 
 -- *****
--- Trigger:
+-- Trigger: Fields initialization.
 -- ***********
 create or replace trigger trig_fields_initialization
   after insert on oblast
@@ -1614,7 +1637,7 @@ create or replace trigger trig_fields_initialization
 
 
 -- *****
--- Trigger:
+-- Trigger: Checks whether the uncovered field is mine or not.
 -- ***********
 create or replace trigger trig_mine_check
   after update of visible on pole
@@ -1636,6 +1659,9 @@ create or replace trigger trig_mine_check
     end if;
   end;
 
+-- *****
+-- Trigger: Check wheter the last move was a winning one or not.
+-- ***********
 create or replace trigger trig_win_check
   after update of visible on pole
   begin
@@ -1646,7 +1672,7 @@ create or replace trigger trig_win_check
   end;
 
 -- *****
--- Trigger:
+-- Trigger: Game finalization.
 -- ***********
 create or replace trigger trig_hra_finalization
   before update of id_stav on hra
@@ -1664,7 +1690,7 @@ create or replace trigger trig_hra_finalization
 
 
 -- *****
--- Trigger:
+-- Trigger: Move finalization.
 -- ***********
 create or replace trigger trig_tah_finalization
   after insert on tah
@@ -1672,7 +1698,8 @@ create or replace trigger trig_tah_finalization
   begin
     case
       when :new.type = game_constants.MOVE_UNCOVER then
-        devSafetyCheckReset();
+        dev_safety_checkReset();
+        clear_tmp(null);
         odkryj_pole(:new.id_pole);
       null;
       when :new.type = game_constants.MOVE_MARK then
@@ -1682,12 +1709,15 @@ create or replace trigger trig_tah_finalization
     end case;
   end;
 
+-- *****
+-- Trigger: Registers game start.
+-- ***********
 create or replace trigger trig_game_beginning
   after insert on tah
   declare
     game  hra%rowtype;
   begin
-    select * into game from hra where hra.id = gameId();
+    select * into game from hra where hra.id = game_id();
 
     if game.start_timestamp is null then
       register_game_beginning();
@@ -1699,12 +1729,52 @@ create or replace trigger trig_game_beginning
 
 /******************* Views ********************/
 
+-- *****
+-- View: Marked non-mine fields.
+-- ***********
 create or replace view chybne_miny as
-  select p.id, p.x, p.y, p.value
+  select  p.id as "ID pole",
+          p.x as "souřadnice X",
+          p.y as "souřadnice Y",
+          p.value as "hodnota"
   from pole p inner join mina m on p.id = m.id_pole
   where p.value != -1
   order by p.id_hra, p.y, p.x;
 
+-- *****
+-- View: Successfully ended games.
+-- ***********
+create or replace view vitezove as
+  select h.id as "ID hry",
+         o.width || 'x' || o.height as rozměr,
+         o.mine_count as "počet min",
+         h.end_timestamp - h.start_timestamp as "doba hry"
+  from hra h inner join oblast o on h.id = o.id_hra
+  where h.id_stav = 4
+  order by h.id;
 
+-- *****
+-- View: Unsuccessfully ended games.
+-- ***********
+create or replace view porazeni as
+  select h.id as "ID hry",
+         o.width || 'x' || o.height as "rozměr",
+         o.mine_count as "počet min",
+         h.end_timestamp - h.start_timestamp as "doba hry",
+         (  select count(m.id)
+            from mina m inner join pole p on p.id = m.id_pole
+            where m.id_hra = h.id and
+                  p.value = -1 ) as "správně odhaleno"
+  from hra h inner join oblast o on h.id = o.id_hra
+  where h.id_stav = 3
+  order by h.id;
 
-
+-- *****
+-- View: Prints playground of the current game.
+-- ***********
+create or replace view oblast_tisk as
+  select radek_oblasti(pole.y, 1, 0) as "hrací pole"
+  from pole
+  where pole.id_hra = game_id()
+  group by pole.y
+  order by pole.y;
