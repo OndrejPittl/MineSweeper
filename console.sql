@@ -167,8 +167,8 @@ create table obtiznost (
   mine_count  number          not null,
 
   -- 9 <= dimension <= 100
-  --CONSTRAINT chk_obtiznost_width CHECK (width BETWEEN 9 AND 100),
-  --CONSTRAINT chk_obtiznost_height CHECK (height BETWEEN 9 AND 100),
+  CONSTRAINT chk_obtiznost_width CHECK (width BETWEEN 9 AND 100),
+  CONSTRAINT chk_obtiznost_height CHECK (height BETWEEN 9 AND 100),
 
   -- max 40 % of area
   CONSTRAINT chk_mine_count CHECK (mine_count < (width * height * 0.4))
@@ -187,6 +187,7 @@ CREATE TABLE omezeni (
 
 -- *****
 -- OBLAST table.
+-- Database integrity checked with trigger.
 -- ***********
 CREATE TABLE oblast (
   id            number        PRIMARY KEY,
@@ -212,7 +213,7 @@ CREATE TABLE pole (
   visible number(1) default 0  NOT NULL,
 
   constraint fk_pole_id_hra foreign key(id_hra) references hra(id),
-  CONSTRAINT chk_pole_value check (value between -1 and 8)
+  CONSTRAINT chk_pole_value check (value between -1 and 8),
 );
 
 
@@ -240,11 +241,14 @@ CREATE TABLE tah (
   timestamp DATE    NOT NULL,
 
   constraint fk_tah_id_hra foreign key(id_hra) references hra(id),
-  constraint fk_tah_id_pole foreign key(id_pole) references pole(id)
+  constraint fk_tah_id_pole foreign key(id_pole) references pole(id),
+  constraint chk_tah_type check (type in (1, 2, 3))
 );
+
 
 -- *****
 -- TMP table.
+-- Mostly used for odkryj_pole and zaminuj_oblast.
 -- ***********
 create table tmp (
   id        number        primary key,  -- PK
@@ -253,9 +257,11 @@ create table tmp (
   group_id  number
 );
 
+
 -- *****
 -- TODO:
--- DEV-ONLY
+-- DEV-ONLY - used as a insurance to prevent from
+--            getting stuck in recursion (odkryj_pole).
 -- ***********
 create table dev_tmp (
   id        number        primary key,
@@ -267,6 +273,7 @@ create table dev_tmp (
 /***************** Sequences ******************/
 
 /*
+-- simulates "create or replace sequence"
 drop sequence seq_tmp_id_increment;
 drop sequence seq_hra_id_increment;
 drop sequence seq_pole_id_increment;
